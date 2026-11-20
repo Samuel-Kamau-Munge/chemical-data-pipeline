@@ -40,6 +40,19 @@ class EventContractTests(unittest.TestCase):
             hashlib.sha256(f"{source_sha256}:row:2".encode()).hexdigest(),
         )
 
+    def test_accepts_additive_event_metadata_for_compatible_updates(self) -> None:
+        source_sha256 = "d" * 64
+        event = _event(
+            source_sha256,
+            "file:started",
+            "file.started",
+            file_name="results.csv",
+            byte_count=10,
+        )
+        event["producer_metadata"] = {"release": "2026.11"}
+
+        self.assertEqual(_validate_event(event), event)
+
     def test_rejects_row_event_with_mismatched_event_id(self) -> None:
         source_sha256 = "b" * 64
         event = _event(

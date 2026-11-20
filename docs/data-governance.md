@@ -2,6 +2,8 @@
 
 This document defines the demonstration project's current data contract and
 governance boundaries. It is not a site policy or regulatory determination.
+All classifications below are proposals only; the site's classification,
+data owner, steward, and access approver remain undefined.
 
 ## Data domains and classification
 
@@ -24,6 +26,10 @@ The CSV contract requires `sample_id`, `batch_id`, `analyte`, `value`, `unit`,
 after whitespace trimming. See the [README](../README.md#input-csv-format) for
 the field semantics, accepted unit aliases, timestamp rules, and validation
 behavior.
+
+The demo Airflow schedule uses `Africa/Nairobi` only as a scheduling example;
+it is not a plant timezone or a rule for interpreting naive measurement
+timestamps.
 
 Kafka messages have `schema_version: 1`, a deterministic `event_id`, a
 `source_sha256`, and an event type. File lifecycle events are

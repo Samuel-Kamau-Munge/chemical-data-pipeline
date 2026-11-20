@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any
 
+from chemical_pipeline.kafka_config import kafka_security_config
 from chemical_pipeline.pipeline import _validate_record
 
 
@@ -248,6 +249,7 @@ def consume(
     try:
         consumer = KafkaConsumer(
             bootstrap_servers=bootstrap_servers.split(","),
+            **kafka_security_config(),
             group_id=group_id,
             enable_auto_commit=False,
             auto_offset_reset="earliest",
@@ -306,6 +308,7 @@ def check_dependencies(bootstrap_servers: str, database_url: str) -> None:
     try:
         consumer = KafkaConsumer(
             bootstrap_servers=bootstrap_servers.split(","),
+            **kafka_security_config(),
             enable_auto_commit=False,
             request_timeout_ms=5000,
             api_version_auto_timeout_ms=5000,

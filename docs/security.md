@@ -45,6 +45,18 @@ component sends commands to manufacturing equipment.
   exactly-once processing.
 - PostgreSQL checks constrain digest shape, lifecycle/status values, JSON
   object/array types, nonnegative counts, and row-count reconciliation.
+- PostgreSQL DDL is applied by a separate migration command with an advisory
+  lock, a transactional checksum ledger, and immutable applied migration
+  files. Airflow also reconciles completed file manifests against persisted
+  accepted/quarantined row events before running dbt.
+- Kafka clients can use TLS with a configured CA, and `SASL_SSL` with PLAIN or
+  SCRAM credentials. TLS certificate verification is enabled; credentials with
+  `PLAINTEXT` are rejected. The Compose broker remains plaintext and no
+  broker-side ACLs are configured.
+- Airflow failure callbacks can POST a minimal run/task identifier payload to
+  an explicitly configured HTTPS webhook, with an optional bearer token from
+  separate secret injection. Redirects and query-string credentials are
+  rejected; a missing endpoint is logged, and notifications are off by default.
 - PostgreSQL uses distinct ingestion, read-only status, and dbt transform
   roles. The consumer is not a database superuser.
 - The Compose demo keeps PostgreSQL and Kafka off host-published ports and
@@ -60,8 +72,9 @@ component sends commands to manufacturing equipment.
 
 ## Demo-only limitations
 
-- Kafka uses plaintext inside an isolated local Docker network. There is no
-  SASL authentication, TLS, broker ACL, schema registry, or production
+- Kafka uses plaintext inside an isolated local Docker network. The client
+  supports TLS/SASL_SSL for an appropriately configured external broker, but
+  there is no broker authentication, ACL, schema registry, or production
   multi-broker replication in this Compose demo.
 - Kubernetes manifests expect Kafka/PostgreSQL services and labels in the same
   namespace. NetworkPolicy is enforced only by a compatible cluster CNI, and
@@ -77,6 +90,9 @@ component sends commands to manufacturing equipment.
   Kubernetes Secrets at rest in production.
 - The code does not impose data retention, per-user access, electronic
   signatures, immutable audit logs, or regulatory validation.
+- The optional webhook is not a monitoring service or incident-response
+  process. Delivery, escalation, SLOs, and endpoint credential management must
+  be configured and tested by the deployment owner.
 
 ## Local secret setup
 
@@ -88,10 +104,6 @@ exposed.
 
 ## Before production
 
-Perform threat modeling and dependency/image scanning; establish TLS and
-broker/database authentication and ACLs; use managed secrets; configure
-network policy for the real cluster; pin and verify image digests; harden and
-separate Airflow components; use an HA metadata database; add backups,
-monitoring, audit, retention, and recovery procedures; and obtain security,
-laboratory-quality, and compliance review. Do not connect this demo to an OT
-or process-control network without a separate approved architecture.
+See the [production-readiness register](production-readiness.md) for all
+remaining infrastructure and approval gates. Do not connect this demo to an
+OT or process-control network without a separate approved architecture.

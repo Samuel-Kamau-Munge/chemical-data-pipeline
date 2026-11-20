@@ -8,6 +8,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY chemical_pipeline ./chemical_pipeline
+COPY infra/postgres/migrations ./infra/postgres/migrations
 
 RUN python -m pip install --no-cache-dir '.[streaming]' \
     && groupadd --system --gid 10001 pipeline \

@@ -19,6 +19,8 @@ PROJECT_ROOT = Path(
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from chemical_pipeline.alerting import notify_failure  # noqa: E402
+from chemical_pipeline.reconciliation import reconcile_source_files  # noqa: E402
 from chemical_pipeline.streaming import StreamingInputError, publish_csv  # noqa: E402
 
 
@@ -93,6 +95,27 @@ def kafka_events_persisted(ti, **_) -> bool:
     return len(terminal) == len(set(source_hashes))
 
 
+def reconcile_persisted_files(ti, **_) -> int:
+    ingestion = ti.xcom_pull(task_ids="publish_incoming_files") or {}
+    source_hashes = [
+        result["source_sha256"] for result in ingestion.get("results", [])
+    ]
+    if not source_hashes:
+        return 0
+
+    try:
+        import psycopg
+    except ImportError as error:
+        raise RuntimeError("The Airflow worker requires psycopg") from error
+
+    with psycopg.connect(
+        os.environ["PIPELINE_READER_DB_URL"], connect_timeout=5
+    ) as connection:
+        count = reconcile_source_files(connection, source_hashes)
+    logging.info("Reconciled %d completed ingestion files", count)
+    return count
+
+
 def report_run(**context) -> None:
     task_instance = context["ti"]
     ingestion = task_instance.xcom_pull(task_ids="publish_incoming_files") or {}
@@ -101,7 +124,12 @@ def report_run(**context) -> None:
         instance.task_id
         for instance in context["dag_run"].get_task_instances()
         if instance.task_id
-        in {"publish_incoming_files", "wait_for_postgres", "dbt_build"}
+        in {
+            "publish_incoming_files",
+            "wait_for_postgres",
+            "reconcile_postgres",
+            "dbt_build",
+        }
         and instance.state != "success"
     ]
     summary = {
@@ -134,6 +162,7 @@ with DAG(
     catchup=False,
     max_active_runs=1,
     tags=["chemical", "kafka", "postgres", "dbt", "data-quality"],
+    default_args={"on_failure_callback": notify_failure},
 ) as dag:
     publish_task = PythonOperator(
         task_id="publish_incoming_files",
@@ -145,6 +174,10 @@ with DAG(
         mode="reschedule",
         poke_interval=5,
         timeout=300,
+    )
+    reconcile_task = PythonOperator(
+        task_id="reconcile_postgres",
+        python_callable=reconcile_persisted_files,
     )
     dbt_task = BashOperator(
         task_id="dbt_build",
@@ -159,4 +192,4 @@ with DAG(
         trigger_rule="all_done",
     )
 
-    publish_task >> wait_task >> dbt_task >> report_task
+    publish_task >> wait_task >> reconcile_task >> dbt_task >> report_task

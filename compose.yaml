@@ -73,6 +73,19 @@ services:
     networks: [pipeline]
     restart: "no"
 
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["migrate"]
+    environment:
+      PIPELINE_ADMIN_DB_URL: postgresql://chemical_admin:${POSTGRES_ADMIN_PASSWORD}@postgres:5432/chemical_lab
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [pipeline]
+    restart: "no"
+
   consumer:
     build:
       context: .
@@ -88,8 +101,8 @@ services:
     depends_on:
       create-topic:
         condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks: [pipeline]
     restart: unless-stopped
     environment:
@@ -127,12 +140,14 @@ services:
       DBT_DB_USER: dbt_transform
       DBT_DB_PASSWORD: ${DBT_DB_PASSWORD}
       AIRFLOW_UID: ${AIRFLOW_UID:-50000}
+      PIPELINE_ALERT_WEBHOOK_URL: ${PIPELINE_ALERT_WEBHOOK_URL:-}
+      PIPELINE_ALERT_WEBHOOK_TOKEN: ${PIPELINE_ALERT_WEBHOOK_TOKEN:-}
     user: "${AIRFLOW_UID:-50000}:0"
     depends_on:
       create-topic:
         condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       consumer:
         condition: service_healthy
     ports:

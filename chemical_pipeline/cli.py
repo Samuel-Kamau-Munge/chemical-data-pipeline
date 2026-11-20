@@ -10,7 +10,9 @@ from chemical_pipeline.pipeline import (
     export_curated,
     ingest_csv,
 )
+from chemical_pipeline.migrations import apply_migrations
 from chemical_pipeline.postgres_consumer import check_dependencies, consume
+from chemical_pipeline.reconciliation import reconcile_source_files
 from chemical_pipeline.streaming import publish_csv
 
 
@@ -67,6 +69,16 @@ def _parser() -> argparse.ArgumentParser:
         "--bootstrap-servers",
         default=os.environ.get("PIPELINE_KAFKA_BOOTSTRAP", "localhost:9092"),
     )
+    commands.add_parser("migrate", help="apply pending PostgreSQL schema migrations")
+
+    reconcile = commands.add_parser(
+        "reconcile", help="compare PostgreSQL file manifests with persisted rows"
+    )
+    reconcile.add_argument(
+        "source_sha256",
+        nargs="+",
+        help="one or more source SHA-256 hashes to reconcile",
+    )
     return parser
 
 
@@ -108,6 +120,30 @@ def main() -> None:
                     args.max_messages,
                 )
                 print(f"committed {count} Kafka events")
+            elif args.command == "migrate":
+                database_url = os.environ.get("PIPELINE_ADMIN_DB_URL")
+                if not database_url:
+                    parser.error("PIPELINE_ADMIN_DB_URL is required")
+                versions = apply_migrations(database_url)
+                print(
+                    "applied migrations: "
+                    + (", ".join(versions) if versions else "none")
+                )
+            elif args.command == "reconcile":
+                database_url = os.environ.get("PIPELINE_READER_DB_URL")
+                if not database_url:
+                    parser.error("PIPELINE_READER_DB_URL is required")
+                try:
+                    import psycopg
+                except ImportError as error:
+                    raise RuntimeError(
+                        "PostgreSQL reconciliation requires the 'streaming' extra"
+                    ) from error
+                with psycopg.connect(database_url) as connection:
+                    count = reconcile_source_files(
+                        connection, args.source_sha256
+                    )
+                print(f"reconciled {count} completed ingestion files")
             else:
                 database_url = os.environ.get("PIPELINE_DB_URL")
                 if not database_url:

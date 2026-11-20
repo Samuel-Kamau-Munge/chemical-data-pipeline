@@ -1,26 +1,9 @@
-#!/usr/bin/env bash
-set -euo pipefail
+CREATE SCHEMA IF NOT EXISTS raw;
+CREATE SCHEMA IF NOT EXISTS analytics AUTHORIZATION dbt_transform;
+CREATE SCHEMA IF NOT EXISTS staging AUTHORIZATION dbt_transform;
+CREATE SCHEMA IF NOT EXISTS marts AUTHORIZATION dbt_transform;
 
-: "${PIPELINE_DB_PASSWORD:?Set PIPELINE_DB_PASSWORD}"
-: "${DBT_DB_PASSWORD:?Set DBT_DB_PASSWORD}"
-: "${PIPELINE_READER_PASSWORD:?Set PIPELINE_READER_PASSWORD}"
-
-psql \
-  --username "$POSTGRES_USER" \
-  --dbname "$POSTGRES_DB" \
-  --set=ingest_password="$PIPELINE_DB_PASSWORD" \
-  --set=dbt_password="$DBT_DB_PASSWORD" \
-  --set=reader_password="$PIPELINE_READER_PASSWORD" <<'SQL'
-CREATE ROLE pipeline_ingest LOGIN PASSWORD :'ingest_password';
-CREATE ROLE dbt_transform LOGIN PASSWORD :'dbt_password';
-CREATE ROLE pipeline_reader LOGIN PASSWORD :'reader_password';
-
-CREATE SCHEMA raw;
-CREATE SCHEMA analytics AUTHORIZATION dbt_transform;
-CREATE SCHEMA staging AUTHORIZATION dbt_transform;
-CREATE SCHEMA marts AUTHORIZATION dbt_transform;
-
-CREATE TABLE raw.ingestion_files (
+CREATE TABLE IF NOT EXISTS raw.ingestion_files (
     source_sha256 CHAR(64) PRIMARY KEY
         CHECK (source_sha256 ~ '^[0-9a-f]{64}$'),
     source_filename TEXT NOT NULL,
@@ -35,7 +18,7 @@ CREATE TABLE raw.ingestion_files (
     CHECK (total_rows = accepted_rows + rejected_rows OR status = 'processing')
 );
 
-CREATE TABLE raw.lab_result_events (
+CREATE TABLE IF NOT EXISTS raw.lab_result_events (
     event_id CHAR(64) PRIMARY KEY
         CHECK (event_id ~ '^[0-9a-f]{64}$'),
     source_sha256 CHAR(64) NOT NULL
@@ -55,9 +38,9 @@ CREATE TABLE raw.lab_result_events (
     )
 );
 
-CREATE INDEX lab_result_events_status_idx
+CREATE INDEX IF NOT EXISTS lab_result_events_status_idx
     ON raw.lab_result_events (status);
-CREATE INDEX lab_result_events_source_idx
+CREATE INDEX IF NOT EXISTS lab_result_events_source_idx
     ON raw.lab_result_events (source_sha256, row_number);
 
 GRANT USAGE ON SCHEMA raw TO pipeline_ingest, pipeline_reader, dbt_transform;
@@ -72,4 +55,3 @@ ALTER DEFAULT PRIVILEGES FOR ROLE dbt_transform IN SCHEMA staging
 ALTER DEFAULT PRIVILEGES FOR ROLE dbt_transform IN SCHEMA marts
     GRANT SELECT ON TABLES TO pipeline_reader;
 GRANT USAGE ON SCHEMA staging, marts TO pipeline_reader;
-SQL

@@ -17,14 +17,14 @@ and security controls.
 | --- | --- | --- |
 | Python ingestion | Strict CSV parser, content-addressed raw archive, deterministic row IDs, event producer | Implemented |
 | Data validation | Required-field, finite-decimal, unit-alias, timestamp, Kafka-envelope, PostgreSQL constraint, and dbt tests | Implemented |
-| Kafka | Keyed versioned events, topic setup, consumer group, manual offset commits after database transactions | Implemented; at-least-once |
-| PostgreSQL | Raw event/manifests tables, constraints, indexes, and distinct service roles | Implemented |
+| Kafka | Keyed versioned events, topic setup, consumer group, manual offset commits, optional TLS/SASL_SSL client support | Implemented; at-least-once; local broker plaintext |
+| PostgreSQL | Raw event/manifests tables, constraints, service roles, checksummed versioned migrations, ingestion reconciliation | Implemented |
 | dbt | Source declarations, staging views, analytical marts, schema tests, generated schema strategy | Implemented; run with Compose |
-| Airflow | Daily DAG: publish, wait for persisted events, `dbt build`, report | Implemented |
+| Airflow | Daily DAG: publish, wait, reconcile, `dbt build`, report; optional HTTPS failure webhook | Implemented; notifications require configuration |
 | Kubernetes | Restricted consumer Deployment, ServiceAccount, resource limits, probes, and egress NetworkPolicy | Example manifest; requires cluster services |
-| Governance | Data contract, classification, lineage, ownership, retention and quality responsibilities | Documented |
-| Pipeline security | Least-privilege roles, secret handling, container hardening, loopback-only UI, network policy | Demo controls; not production-certified |
-| CI | Python unit tests and dbt project parsing on pull requests/pushes | Configured in GitHub Actions |
+| Governance | Data contract, proposed classification, lineage, ownership, retention and quality responsibilities | Documented; site approval outstanding |
+| Pipeline security | Least-privilege roles, optional Kafka TLS clients, HTTPS alert hook, container hardening, network policy | Demo controls; not production-certified |
+| CI | Python unit tests, dbt parse, PostgreSQL migration/reconciliation integration test | Configured in GitHub Actions |
 
 This repository contains concrete configuration and code for the listed
 technologies; it does not claim that a full distributed or regulated
@@ -69,6 +69,10 @@ chemical_pipeline/
   pipeline.py                 CSV parsing, validation, SQLite demo mode
   streaming.py                Validated, versioned Kafka producer
   postgres_consumer.py        Kafka consumer, PostgreSQL writes, event checks
+  kafka_config.py             Optional TLS/SASL_SSL client configuration
+  migrations.py               Locked, checksummed PostgreSQL migration runner
+  reconciliation.py           PostgreSQL manifest-to-event reconciliation
+  alerting.py                 HTTPS Airflow failure webhook
   cli.py                      Local and streaming command-line interface
 dags/
   chemical_lab_csv_pipeline.py
@@ -83,16 +87,22 @@ dbt/
     marts/                    Batch/analyte and ingestion-quality models
     schema.yml                dbt data-quality tests and descriptions
 infra/postgres/init/
-  001_schema_and_roles.sh     Demo raw schema, constraints, service roles
+  001_roles.sh                Demo service roles
+infra/postgres/migrations/
+  0001_initial_schema.sql     Versioned PostgreSQL baseline
 k8s/base/                     Kustomize consumer Deployment and policy example
 docs/
   data-governance.md
   security.md
+  production-readiness.md     Status register and unresolved approval gates
 examples/
   lab-results.csv             Synthetic accepted and rejected examples
 tests/
   test_pipeline.py
   test_events.py
+  test_migrations.py
+  test_reconciliation.py
+  test_migrations_integration.py
 compose.yaml                  Local Kafka, PostgreSQL, consumer, and Airflow
 Dockerfile                    Non-root Python consumer image
 Dockerfile.airflow            Airflow/dbt runtime image
@@ -166,8 +176,9 @@ database writes**, not distributed exactly-once processing.
 
 ### PostgreSQL raw model
 
-The initialization script creates `raw.ingestion_files` and
-`raw.lab_result_events`.
+The versioned migration creates `raw.ingestion_files` and
+`raw.lab_result_events`. A dedicated one-shot Compose service applies pending
+migrations before starting the consumer or Airflow.
 
 `raw.ingestion_files` columns:
 
@@ -280,8 +291,17 @@ trigger it when ready. The DAG:
 
 1. publishes each `.csv` directly under `data/incoming/`;
 2. waits until Kafka events are persisted into PostgreSQL;
-3. runs `dbt build` (models plus data tests); and
-4. reports file errors and failed upstream tasks.
+3. reconciles each file manifest with persisted row-event counts;
+4. runs `dbt build` (models plus data tests); and
+5. reports file errors and failed upstream tasks.
+
+Failed Airflow tasks can send a minimal HTTPS webhook notification when
+`PIPELINE_ALERT_WEBHOOK_URL` is configured, with an optional bearer token in
+`PIPELINE_ALERT_WEBHOOK_TOKEN`. Keep tokens out of URLs and inject them through
+a managed secret in shared environments. The payload contains only DAG, task,
+run, and attempt identifiers; it contains no sample or result values. Without
+an endpoint, failures remain visible in Airflow state and logs, but no external
+notification is sent.
 
 The incoming files are not moved or deleted. Re-running an identical CSV may
 republish the same deterministic events; PostgreSQL prevents duplicate rows.
@@ -303,6 +323,12 @@ Stop the demo without deleting its databases or volumes:
 docker compose down
 ```
 
+The `migrate` service maintains `pipeline_meta.schema_migrations`, takes a
+PostgreSQL advisory lock, applies each SQL migration transactionally, and
+refuses to run if an already-applied migration's checksum changes. The initial
+migration is safe to apply to the demo's existing schema. Future changes must
+be forward-only and preserve the prior application contract during rollout.
+
 `docker compose down -v` deletes the demo's PostgreSQL, Kafka, and Airflow
 volumes. Use that only when intentionally resetting all local demo state.
 
@@ -322,6 +348,21 @@ Install optional streaming clients for host-side Kafka/PostgreSQL commands:
 
 ```bash
 python -m pip install -e '.[streaming]'
+```
+
+For a configured PostgreSQL environment, use the admin-only migration command
+and the read-only reconciliation command:
+
+```bash
+PIPELINE_ADMIN_DB_URL="$PIPELINE_ADMIN_DB_URL" \
+  python -m chemical_pipeline migrate
+PIPELINE_READER_DB_URL="$PIPELINE_READER_DB_URL" \
+  python -m chemical_pipeline reconcile <source-sha256> [<source-sha256> ...]
+```
+
+The streaming commands are also available:
+
+```bash
 python -m chemical_pipeline publish examples/lab-results.csv \
   --bootstrap-servers localhost:9092
 PIPELINE_DB_URL="$PIPELINE_DB_URL" \
@@ -332,17 +373,29 @@ In the Compose demo, Kafka and PostgreSQL are intentionally not exposed on
 host ports. Use the Airflow DAG or execute publisher commands from a container
 on the Compose network.
 
+The demo configurations use plaintext Kafka. For a TLS-enabled external broker,
+set `PIPELINE_KAFKA_SECURITY_PROTOCOL=SSL` or `SASL_SSL` and
+provide a trusted `PIPELINE_KAFKA_SSL_CA_FILE`; `SASL_SSL` additionally requires
+`PIPELINE_KAFKA_SASL_MECHANISM`, `PIPELINE_KAFKA_SASL_USERNAME`, and
+`PIPELINE_KAFKA_SASL_PASSWORD`. Credentials over plaintext are rejected. Broker
+ACLs and principal provisioning remain responsibilities of the Kafka platform.
+
 ## Airflow
 
 The DAG ID is `chemical_lab_csv_pipeline`, scheduled daily at 09:00
-`Africa/Nairobi`, with catchup disabled and at most one active DAG run. Its
-task graph is:
+`Africa/Nairobi` for the demo, with catchup disabled and at most one active DAG
+run. This schedule timezone is not a plant timezone decision; set it with
+plant operations after the site timezone is formally established. Its task
+graph is:
 
 ```text
 publish_incoming_files
         |
         v
 wait_for_postgres
+        |
+        v
+reconcile_postgres
         |
         v
 dbt_build
@@ -353,7 +406,8 @@ report_run
 
 `wait_for_postgres` is a rescheduling sensor, not a busy loop. The report task
 uses `all_done` and checks upstream task states as well as file errors so a
-successful report task cannot hide a failed publish, sensor, or dbt task.
+successful report task cannot hide a failed publish, sensor, reconciliation,
+or dbt task. Failure webhooks use the optional HTTPS endpoint described above.
 
 The Airflow image uses Airflow `3.1.0`, Python `3.12`, and dbt-postgres
 `1.9.0`, installed with Airflow's published constraints. Airflow `standalone`
@@ -365,8 +419,9 @@ provider and metadata database.
 
 `k8s/base/` contains a Kustomize deployment for the non-root Kafka/PostgreSQL
 consumer, plus a restricted ServiceAccount, resource requests/limits,
-startup/readiness probes, and an egress NetworkPolicy. It deliberately does
-not deploy Kafka, PostgreSQL, or Airflow. Provision those services and the
+startup/readiness probes, optional Kafka CA Secret mount, and an egress
+NetworkPolicy. It deliberately does not deploy Kafka, PostgreSQL, or Airflow.
+Provision those services and the
 PostgreSQL schema/roles first. The manifests expect Kafka/PostgreSQL pods
 labeled `app.kubernetes.io/name: kafka` and `app.kubernetes.io/name: postgres`
 in the `chemical-lab` namespace. The default Kafka service address is
@@ -403,16 +458,20 @@ kubectl -n chemical-lab get deployment,pods
 
 Restrict the environment file to its owner (`chmod 600`) and do not put real
 passwords in a committed YAML manifest or command history. Use your cluster's
-secret-management integration for shared environments. The NetworkPolicy
+secret-management integration for shared environments. For an external
+`SASL_SSL` broker, set the ConfigMap protocol to `SASL_SSL`, populate the
+SASL username/password keys in the mounted consumer Secret, and create the
+`kafka-ca` Secret with its `ca.crt` key. The example uses a Kubernetes Secret
+as a placeholder, not a managed secrets integration. The NetworkPolicy
 requires a CNI that enforces Kubernetes NetworkPolicy and may need adaptation
 for a managed Kafka/PostgreSQL service or different cluster DNS. These are
 application deployment examples, not a complete production cluster chart.
 
 ## Data governance and security
 
-The project classifies lab values, sample/batch identifiers, lineage, raw
-quarantine payloads, and service credentials, and documents data ownership,
-lineage, quality responsibilities, and retention decisions in
+The project proposes classifications for lab values, sample/batch identifiers,
+lineage, raw quarantine payloads, and service credentials, and documents
+ownership, quality responsibilities, and unresolved retention requirements in
 [`docs/data-governance.md`](docs/data-governance.md). The threat boundaries,
 implemented controls, and gaps are in [`docs/security.md`](docs/security.md).
 
@@ -421,6 +480,8 @@ Implemented demonstration controls include:
 - validation before publishing and explicit quarantine instead of silent drops;
 - deterministic identities, raw source retention, database constraints, and
   replay-safe writes;
+- checksummed PostgreSQL schema migrations and manifest-to-row reconciliation;
+- optional TLS/SASL_SSL client transport and HTTPS Airflow failure notification;
 - least-privilege database service roles;
 - non-root consumer containers with a read-only root filesystem and dropped
   Linux capabilities;
@@ -429,9 +490,10 @@ Implemented demonstration controls include:
 - restricted Kubernetes service account and egress policy; and
 - ignored local credentials and generated data.
 
-This demo does **not** implement Kafka TLS/SASL/ACLs, encryption at rest,
+The local broker is plaintext; client TLS/SASL_SSL support does not configure
+broker ACLs or managed identities. The project also lacks encryption at rest,
 production identity/authorization, backups, retention enforcement, signed or
-immutable audit records, an external schema registry, or regulatory
+immutable audit records, an external schema registry, and regulatory
 validation. The synthetic CSV format has no human or patient data. Do not
 connect the demo to a plant control network or use its marts for release
 decisions.
@@ -445,20 +507,23 @@ python3 -m unittest discover -s tests -v
 ```
 
 The unit suite exercises SQLite ingestion/export, normalization, quarantine,
-idempotency, and Kafka envelope validation. GitHub Actions runs the unit suite
-on Python 3.10, 3.11, and 3.12, plus a no-database `dbt parse` check.
+idempotency, Kafka envelope and security configuration, migration discovery,
+alert payloads, and reconciliation behavior. GitHub Actions runs the suite on
+Python 3.10, 3.11, and 3.12, a no-database `dbt parse`, and a PostgreSQL-backed
+migration/reconciliation integration test.
 
 The full Kafka/PostgreSQL/Airflow/dbt flow requires Docker Compose and has not
 been run in this environment because Docker is unavailable. The Kubernetes
 manifest requires a cluster; the project does not claim to have deployed it.
 
-## Production-readiness gaps
+## Production readiness
 
-Before calling this production-ready, add site-specific LIMS/instrument
-integration, analyte/method/specification rules, operational alerting and
-reconciliation, schema migrations and backward-compatibility policy,
-high-availability Kafka/PostgreSQL/Airflow, secure broker transport and ACLs,
-managed secrets, encrypted backups and restore tests, retention enforcement,
-auditable access controls, and formal quality/security/compliance validation.
-Review all unit conventions and the source data classification with laboratory
-and quality owners.
+The project now has a versioned database migration path, event-count
+reconciliation, optional HTTPS failure notifications, and optional secure
+Kafka client transport. It remains a hardening reference, **not production
+ready**: site-specific interfaces and laboratory rules are undefined, the
+local services are not highly available, and security, backup, retention,
+audit, quality, and compliance controls still require environment-specific
+implementation and owner approval. See the
+[production-readiness register](docs/production-readiness.md) for evidence
+and unresolved gates.

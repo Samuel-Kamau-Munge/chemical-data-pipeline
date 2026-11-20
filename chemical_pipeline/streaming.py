@@ -13,6 +13,7 @@ from chemical_pipeline.pipeline import (
     _rows,
     _validate_record,
 )
+from chemical_pipeline.kafka_config import kafka_security_config
 
 
 class StreamingInputError(PipelineInputError):
@@ -70,6 +71,7 @@ def publish_csv(
     source_sha256, byte_count, archived_path = _archive_source(source_path, raw_dir)
     producer = KafkaProducer(
         bootstrap_servers=bootstrap_servers.split(","),
+        **kafka_security_config(),
         key_serializer=lambda value: value.encode("utf-8"),
         value_serializer=lambda value: json.dumps(
             value, ensure_ascii=False, separators=(",", ":")

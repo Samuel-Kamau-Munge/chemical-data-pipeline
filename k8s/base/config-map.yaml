@@ -5,3 +5,5 @@ metadata:
   namespace: chemical-lab
 data:
   PIPELINE_KAFKA_BOOTSTRAP: kafka-bootstrap.chemical-lab.svc.cluster.local:9092
+  PIPELINE_KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+  PIPELINE_KAFKA_SSL_CA_FILE: ""

@@ -37,17 +37,35 @@ spec:
             - lab-results.v1
             - --group-id
             - chemical-postgres-writer
+          envFrom:
+            - secretRef:
+                name: pipeline-consumer-secrets
+                optional: true
           env:
             - name: PIPELINE_KAFKA_BOOTSTRAP
               valueFrom:
                 configMapKeyRef:
                   name: pipeline-consumer
                   key: PIPELINE_KAFKA_BOOTSTRAP
+            - name: PIPELINE_KAFKA_SECURITY_PROTOCOL
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-consumer
+                  key: PIPELINE_KAFKA_SECURITY_PROTOCOL
+            - name: PIPELINE_KAFKA_SSL_CA_FILE
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-consumer
+                  key: PIPELINE_KAFKA_SSL_CA_FILE
             - name: PIPELINE_DB_URL
               valueFrom:
                 secretKeyRef:
                   name: pipeline-consumer-secrets
                   key: PIPELINE_DB_URL
+          volumeMounts:
+            - name: kafka-ca
+              mountPath: /etc/ssl/kafka
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -78,3 +96,11 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 8
             failureThreshold: 3
+      volumes:
+        - name: kafka-ca
+          secret:
+            secretName: kafka-ca
+            optional: true
+            items:
+              - key: ca.crt
+                path: ca.crt
