@@ -10,13 +10,18 @@ COPY --chown=airflow:root pyproject.toml README.md /opt/chemical-pipeline/
 COPY --chown=airflow:root chemical_pipeline /opt/chemical-pipeline/chemical_pipeline
 COPY --chown=airflow:root dbt /opt/chemical-pipeline/dbt
 
+RUN mkdir -p /opt/chemical-pipeline/dbt/logs /opt/chemical-pipeline/dbt/target \
+    && chmod -R a+rwX /opt/chemical-pipeline/dbt
+
 RUN pip install --no-cache-dir \
     "apache-airflow==${AIRFLOW_VERSION}" \
     "kafka-python==2.2.15" \
     "psycopg[binary]==3.2.9" \
-    "dbt-core==1.9.0" \
-    "dbt-postgres==1.9.0" \
     --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PYTHON_VERSION}.txt" \
+    && pip install --no-cache-dir \
+    "protobuf==4.25.8" \
+    "dbt-core==1.7.10" \
+    "dbt-postgres==1.7.10" \
     && pip install --no-cache-dir --no-deps -e /opt/chemical-pipeline
 
 ENV PYTHONPATH="/opt/chemical-pipeline"

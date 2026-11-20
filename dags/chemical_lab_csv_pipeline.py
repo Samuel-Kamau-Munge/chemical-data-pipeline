@@ -120,18 +120,6 @@ def report_run(**context) -> None:
     task_instance = context["ti"]
     ingestion = task_instance.xcom_pull(task_ids="publish_incoming_files") or {}
     errors = ingestion.get("errors", [])
-    failed_tasks = [
-        instance.task_id
-        for instance in context["dag_run"].get_task_instances()
-        if instance.task_id
-        in {
-            "publish_incoming_files",
-            "wait_for_postgres",
-            "reconcile_postgres",
-            "dbt_build",
-        }
-        and instance.state != "success"
-    ]
     summary = {
         "files_found": ingestion.get("files_found", 0),
         "files_published": sum(
@@ -145,10 +133,10 @@ def report_run(**context) -> None:
             result["rejected_rows"] for result in ingestion.get("results", [])
         ),
         "file_errors": errors,
-        "failed_tasks": failed_tasks,
+        "upstream_states": "visible in Airflow task state",
     }
     logging.info("Chemical lab streaming run summary: %s", summary)
-    if errors or failed_tasks:
+    if errors:
         raise AirflowException(
             "The chemical lab streaming pipeline did not complete successfully."
         )

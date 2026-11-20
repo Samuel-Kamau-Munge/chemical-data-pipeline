@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install dbt-core==1.9.0 dbt-postgres==1.9.0
+      - run: python -m pip install dbt-core==1.7.10 dbt-postgres==1.7.10 protobuf==4.25.8
       - name: Parse dbt project
         env:
           DBT_DB_PASSWORD: ci-placeholder

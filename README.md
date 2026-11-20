@@ -263,7 +263,7 @@ root:
 The Compose stack pins PostgreSQL `16.6-alpine`, Apache Kafka `4.0.0`, and
 Airflow `3.1.0` on Python `3.12`; the Python consumer uses
 `kafka-python==2.2.15` and `psycopg==3.2.9`, while dbt uses
-`dbt-core==1.9.0` and `dbt-postgres==1.9.0`. Airflow `standalone` uses its own
+`dbt-core==1.7.10` and `dbt-postgres==1.7.10`. Airflow `standalone` uses its own
 SQLite metadata database in the `airflow_data` volume; PostgreSQL is the
 pipeline's raw/analytics database.
 
@@ -410,7 +410,8 @@ successful report task cannot hide a failed publish, sensor, reconciliation,
 or dbt task. Failure webhooks use the optional HTTPS endpoint described above.
 
 The Airflow image uses Airflow `3.1.0`, Python `3.12`, and dbt-postgres
-`1.9.0`, installed with Airflow's published constraints. Airflow `standalone`
+`1.7.10`, with dbt and protobuf aligned to the Airflow 3.1.0 constraints.
+Airflow `standalone`
 and its Simple Auth Manager are for local demonstration only. For production,
 deploy separately managed Airflow components with an approved identity
 provider and metadata database.
