@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pipeline-consumer
+  namespace: chemical-lab
+  labels:
+    app.kubernetes.io/name: pipeline-consumer
+    app.kubernetes.io/part-of: chemical-lab-pipeline
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pipeline-consumer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pipeline-consumer
+        app.kubernetes.io/part-of: chemical-lab-pipeline
+    spec:
+      serviceAccountName: pipeline-consumer
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: consumer
+          image: chemical-lab-pipeline:local
+          imagePullPolicy: IfNotPresent
+          args:
+            - consume
+            - --bootstrap-servers
+            - $(PIPELINE_KAFKA_BOOTSTRAP)
+            - --topic
+            - lab-results.v1
+            - --group-id
+            - chemical-postgres-writer
+          env:
+            - name: PIPELINE_KAFKA_BOOTSTRAP
+              valueFrom:
+                configMapKeyRef:
+                  name: pipeline-consumer
+                  key: PIPELINE_KAFKA_BOOTSTRAP
+            - name: PIPELINE_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: pipeline-consumer-secrets
+                  key: PIPELINE_DB_URL
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          startupProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import chemical_pipeline"
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -m
+                - chemical_pipeline
+                - healthcheck
+            periodSeconds: 15
+            timeoutSeconds: 8
+            failureThreshold: 3

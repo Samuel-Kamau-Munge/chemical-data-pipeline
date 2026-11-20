@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chemical-lab-pipeline"
+version = "0.1.0"
+description = "A traceable ingestion and validation pipeline for chemical laboratory results"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+streaming = [
+    "kafka-python==2.2.15",
+    "psycopg[binary]==3.2.9",
+]
+
+[project.scripts]
+chemical-lab-pipeline = "chemical_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["chemical_pipeline*"]

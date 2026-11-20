@@ -1,0 +1,21 @@
+name: chemical_lab
+version: "1.0.0"
+config-version: 2
+profile: chemical_lab
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  chemical_lab:
+    staging:
+      +schema: staging
+      +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table

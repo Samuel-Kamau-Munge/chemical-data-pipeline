@@ -1,0 +1,5 @@
+sample_id,batch_id,analyte,value,unit,measured_at,method,instrument
+S-100,B-42,chloride,2.50,mg/L,2026-11-19T10:00:00Z,IC,IC-1
+S-101,B-42,chloride,2.70,mg/L,2026-11-19T10:10:00Z,IC,IC-1
+S-102,B-42,chloride,not-a-number,mg/L,2026-11-19T10:20:00Z,IC,IC-1
+S-103,B-42,chloride,2.60,unsupported-unit,2026-11-19T10:30:00Z,IC,IC-1

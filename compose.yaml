@@ -1,0 +1,156 @@
+name: chemical-lab-pipeline
+
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_DB: chemical_lab
+      POSTGRES_USER: chemical_admin
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD in .env}
+      PIPELINE_DB_PASSWORD: ${PIPELINE_DB_PASSWORD:?Set PIPELINE_DB_PASSWORD in .env}
+      DBT_DB_PASSWORD: ${DBT_DB_PASSWORD:?Set DBT_DB_PASSWORD in .env}
+      PIPELINE_READER_PASSWORD: ${PIPELINE_READER_PASSWORD:?Set PIPELINE_READER_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [pipeline]
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:4.0.0
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    networks: [pipeline]
+    restart: unless-stopped
+
+  create-topic:
+    image: apache/kafka:4.0.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint:
+      - /opt/kafka/bin/kafka-topics.sh
+      - --bootstrap-server
+      - kafka:9092
+      - --create
+      - --if-not-exists
+      - --topic
+      - lab-results.v1
+      - --partitions
+      - "3"
+      - --replication-factor
+      - "1"
+    networks: [pipeline]
+    restart: "no"
+
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - consume
+      - --bootstrap-servers
+      - kafka:9092
+      - --topic
+      - lab-results.v1
+      - --group-id
+      - chemical-postgres-writer
+    depends_on:
+      create-topic:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    networks: [pipeline]
+    restart: unless-stopped
+    environment:
+      PIPELINE_KAFKA_BOOTSTRAP: kafka:9092
+      PIPELINE_DB_URL: postgresql://pipeline_ingest:${PIPELINE_DB_PASSWORD}@postgres:5432/chemical_lab
+    healthcheck:
+      test: ["CMD", "python", "-m", "chemical_pipeline", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+
+  airflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    command: ["standalone"]
+    environment:
+      AIRFLOW_HOME: /opt/airflow
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "True"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+      CHEMICAL_PIPELINE_HOME: /opt/chemical-pipeline
+      CHEMICAL_PIPELINE_DATA: /data
+      PIPELINE_KAFKA_BOOTSTRAP: kafka:9092
+      PIPELINE_READER_DB_URL: postgresql://pipeline_reader:${PIPELINE_READER_PASSWORD}@postgres:5432/chemical_lab
+      DBT_HOST: postgres
+      DBT_PORT: "5432"
+      DBT_DATABASE: chemical_lab
+      DBT_DB_USER: dbt_transform
+      DBT_DB_PASSWORD: ${DBT_DB_PASSWORD}
+      AIRFLOW_UID: ${AIRFLOW_UID:-50000}
+    user: "${AIRFLOW_UID:-50000}:0"
+    depends_on:
+      create-topic:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      consumer:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - airflow_data:/opt/airflow
+      - ./dags:/opt/airflow/dags:ro
+      - ./data:/data
+    networks: [pipeline]
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:
+  kafka_data:
+  airflow_data:
+
+networks:
+  pipeline:
+    internal: true

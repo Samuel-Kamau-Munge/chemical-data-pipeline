@@ -1,0 +1,38 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Kafka events persisted by the PostgreSQL consumer.
+    database: "{{ env_var('DBT_DATABASE', 'chemical_lab') }}"
+    schema: raw
+    tables:
+      - name: ingestion_files
+        description: File-level ingestion lifecycle and reconciliation counts.
+        columns:
+          - name: source_sha256
+            description: SHA-256 digest of the original CSV bytes.
+            tests:
+              - not_null
+              - unique
+          - name: status
+            tests:
+              - accepted_values:
+                  values: ["processing", "completed", "failed"]
+      - name: lab_result_events
+        description: Accepted and quarantined result events from Kafka.
+        columns:
+          - name: event_id
+            description: Deterministic SHA-256 identity for source file and CSV row.
+            tests:
+              - not_null
+              - unique
+          - name: source_sha256
+            tests:
+              - not_null
+              - relationships:
+                  to: source('raw', 'ingestion_files')
+                  field: source_sha256
+          - name: status
+            tests:
+              - accepted_values:
+                  values: ["accepted", "quarantined"]

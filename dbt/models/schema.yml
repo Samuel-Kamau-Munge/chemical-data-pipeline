@@ -1,0 +1,70 @@
+version: 2
+
+models:
+  - name: stg_lab_results
+    description: Validated laboratory measurements with source lineage and units.
+    columns:
+      - name: result_id
+        description: Stable event identity derived from source digest and CSV row.
+        tests:
+          - not_null
+          - unique
+      - name: source_sha256
+        tests:
+          - not_null
+      - name: sample_id
+        tests:
+          - not_null
+      - name: batch_id
+        tests:
+          - not_null
+      - name: analyte
+        tests:
+          - not_null
+      - name: unit
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["mg/L", "g/L", "ug/L", "mg/kg", "g/kg", "%", "pH"]
+      - name: result_value
+        tests:
+          - not_null
+      - name: timestamp_timezone_known
+        tests:
+          - not_null
+  - name: stg_quarantined_results
+    description: Rejected records and machine-readable validation messages.
+    columns:
+      - name: quarantine_id
+        tests:
+          - not_null
+          - unique
+      - name: errors
+        tests:
+          - not_null
+  - name: fct_batch_analyte_quality
+    description: Descriptive statistics grouped without mixing units.
+    columns:
+      - name: batch_id
+        tests:
+          - not_null
+      - name: analyte
+        tests:
+          - not_null
+      - name: unit
+        tests:
+          - not_null
+      - name: accepted_result_count
+        tests:
+          - not_null
+  - name: agg_ingestion_quality
+    description: File-level ingestion outcomes and rejection fractions.
+    columns:
+      - name: source_sha256
+        tests:
+          - not_null
+          - unique
+      - name: ingestion_status
+        tests:
+          - accepted_values:
+              values: ["processing", "completed", "failed"]
