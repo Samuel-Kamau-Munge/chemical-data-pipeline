@@ -284,7 +284,7 @@ Put the included synthetic file in the watched folder:
 cp examples/lab-results.csv data/incoming/
 ```
 
-The Airflow DAG is paused on creation. Open <http://127.0.0.1:8080>, obtain the
+The Airflow DAG is paused on creation. Open <http://127.0.0.1:8081>, obtain the
 generated development admin password from the local Airflow container output
 or its Airflow home, inspect `chemical_lab_csv_pipeline`, then unpause and
 trigger it when ready. The DAG:
