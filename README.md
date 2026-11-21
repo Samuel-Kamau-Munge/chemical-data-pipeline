@@ -33,6 +33,39 @@ Kafka ingestion, PostgreSQL persistence, reconciliation, and dbt tests.
 Kubernetes deployment and site-specific LIMS/instrument integration have not
 been exercised or configured.
 
+## Data engineering problem addressed
+
+The pipeline addresses a common lab-data ingestion problem: CSV batches can
+contain a mix of usable results and malformed measurements or unsupported
+units. Loading such files directly into analytics risks either rejecting the
+whole batch or allowing bad values into downstream reporting. The pipeline
+validates each row, retains the original input, quarantines invalid rows with
+explicit reasons, and continues processing valid rows. Kafka events, durable
+PostgreSQL manifests, reconciliation, and dbt tests provide traceability from
+source file through analytical models.
+
+The included synthetic fixture makes this behavior concrete. These are
+fixture errors, not records from a plant or evidence of a historical incident:
+
+| GitHub CSV line | Input | Validation finding and disposition |
+| --- | --- | --- |
+| [Line 4](https://github.com/Samuel-Kamau-Munge/chemical-data-pipeline/blob/main/examples/lab-results.csv#L4) | `S-102,B-42,chloride,not-a-number,mg/L,2026-11-19T10:20:00Z,IC,IC-1` | `value must be a finite decimal number`; the original row is quarantined. |
+| [Line 5](https://github.com/Samuel-Kamau-Munge/chemical-data-pipeline/blob/main/examples/lab-results.csv#L5) | `S-103,B-42,chloride,2.60,unsupported-unit,2026-11-19T10:30:00Z,IC,IC-1` | `unit is not in the supported alias list: unsupported-unit`; the original row is quarantined. |
+
+For this four-row fixture, the exercised pipeline accepted two rows and
+quarantined two. It also avoids republishing a file whose content hash is
+already marked completed, commits Kafka offsets only after PostgreSQL commits,
+and checks manifest counts against persisted events before dbt runs. These are
+implemented behavior and fixture-level evidence, not measurements from a
+production plant.
+
+This repository does **not** substantiate reductions in query processing
+time, Azure costs, or pipeline downtime. It contains no Azure deployment or
+billing data, no before/after query benchmark, and no production incident or
+availability history. The one-minute Airflow poll is a pickup cadence, not a
+processing-time or uptime guarantee; the local Compose stack is not highly
+available. Those claims require measurements from the target environment.
+
 ## Architecture
 
 ```text
