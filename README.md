@@ -276,7 +276,9 @@ docker compose ps
 The setup script creates a local `.env` with four distinct random hexadecimal
 passwords and prepares `data/`. The file is mode `0600` and ignored by Git.
 Never commit `.env`; use a managed secrets system for anything beyond a
-disposable local demo.
+disposable local demo. Kafka and PostgreSQL stay on an internal-only Compose
+network; Airflow joins a separate UI network and publishes only its web UI to
+host loopback (`127.0.0.1:8081`).
 
 Put the included synthetic file in the watched folder:
 

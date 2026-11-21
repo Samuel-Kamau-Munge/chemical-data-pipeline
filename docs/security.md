@@ -59,9 +59,9 @@ component sends commands to manufacturing equipment.
   rejected; a missing endpoint is logged, and notifications are off by default.
 - PostgreSQL uses distinct ingestion, read-only status, and dbt transform
   roles. The consumer is not a database superuser.
-- The Compose demo keeps PostgreSQL and Kafka off host-published ports and
-  binds the Airflow UI to loopback (`127.0.0.1`). The Compose network is
-  internal to the demo.
+- The Compose demo keeps PostgreSQL and Kafka on an internal-only network and
+  off host-published ports. Airflow joins that network plus a separate UI
+  network; only the UI is published to host loopback (`127.0.0.1`).
 - The consumer container runs non-root, drops Linux capabilities, uses a
   read-only root filesystem, and disables privilege escalation.
 - Kubernetes examples use a restricted service account, non-root security

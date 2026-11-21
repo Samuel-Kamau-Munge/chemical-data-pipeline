@@ -156,7 +156,7 @@ services:
       - airflow_data:/opt/airflow
       - ./dags:/opt/airflow/dags:ro
       - ./data:/data
-    networks: [pipeline]
+    networks: [pipeline, airflow-ui]
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -169,3 +169,4 @@ volumes:
 networks:
   pipeline:
     internal: true
+  airflow-ui:
