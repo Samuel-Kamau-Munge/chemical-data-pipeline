@@ -20,7 +20,7 @@ assumed in this project.
 | Units, conversions, timezone, classification | Supported unit spellings only; no conversions or plant timezone inferred; classification is a proposal | **Blocked.** Laboratory/metrology and data owners must approve units, precision, timezone, classification, and access restrictions. |
 | Operational alerting | Optional HTTPS Airflow failure webhook with a separately injected bearer token; minimal run/task identifiers only | **Partial.** Configure an approved endpoint and token through a managed secret, test delivery/escalation, and define SLOs and on-call ownership. |
 | Operational reconciliation | Airflow compares terminal manifests with persisted accepted/quarantined row counts before dbt | **Implemented in code; not deployed.** Add recovery procedures and validate behavior against real operational failure scenarios. |
-| PostgreSQL schema migrations | One-shot runner, advisory lock, per-migration transaction, checksum ledger, integration test | **Implemented for the demo baseline.** Production migration identity, grants, backup/rollback strategy, and release approval remain to be designed. |
+| PostgreSQL schema migrations | One-shot runner, advisory lock, per-migration transaction, checksum ledger, integration test | **Implemented for the current baseline.** Production migration identity, grants, backup/rollback strategy, and release approval remain to be designed. |
 | Backward compatibility | Policy below: additive database changes and versioned event/topic contracts | **Policy documented, not a complete compatibility test matrix.** Add tests for each approved application/database version before release. |
 | Kafka/PostgreSQL/Airflow high availability | Compose uses one Kafka broker, one PostgreSQL instance, and Airflow `standalone` | **Blocked.** Choose an approved platform, topology, replication/failover, Airflow executor and HA metadata database; exercise failover. |
 | Secure Kafka transport and ACLs | Producer/consumer support TLS and SASL over TLS with CA verification; local broker remains plaintext | **Partial.** Configure broker-side TLS, principals, topic/group ACLs, certificate rotation, and managed-broker policy. |
@@ -53,8 +53,8 @@ For Kafka, additive envelope fields may be introduced without changing
 `schema_version` only when old consumers can ignore them. A breaking contract
 change requires a new schema version and versioned topic, a documented
 dual-read/producer migration window, and tests for every supported consumer.
-The current demo has no schema registry or automated multi-version matrix.
-SQLite demo tables do not have a migration mechanism.
+The current deployment has no schema registry or automated multi-version
+matrix. The SQLite compatibility tables do not have a migration mechanism.
 
 ## Deployment and approval gates
 
@@ -74,5 +74,5 @@ Before any production connection or production-readiness claim:
 5. Record a release-specific validation result. Passing this repository's
    automated tests alone is not production acceptance.
 
-Do not connect this demonstration to a plant control network or use its
+Do not connect this pipeline to a plant control network or use its
 analytical outputs for laboratory release decisions.

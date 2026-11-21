@@ -1,9 +1,8 @@
 # Security design and threat boundaries
 
-This is a local portfolio demonstration, not a production security
-certification. Security controls are included to make trust boundaries
-visible; their effectiveness depends on deployment configuration and a
-supporting infrastructure.
+This document describes the current pipeline's security controls and gaps; it
+is not a production security certification. Their effectiveness depends on
+deployment configuration and supporting infrastructure.
 
 ## Trust boundaries
 
@@ -59,23 +58,24 @@ component sends commands to manufacturing equipment.
   rejected; a missing endpoint is logged, and notifications are off by default.
 - PostgreSQL uses distinct ingestion, read-only status, and dbt transform
   roles. The consumer is not a database superuser.
-- The Compose demo keeps PostgreSQL and Kafka on an internal-only network and
-  off host-published ports. Airflow joins that network plus a separate UI
-  network; only the UI is published to host loopback (`127.0.0.1`).
+- The Compose deployment keeps PostgreSQL and Kafka on an internal-only
+  network and off host-published ports. Airflow joins that network plus a
+  separate UI network; only the UI is published to host loopback
+  (`127.0.0.1`).
 - The consumer container runs non-root, drops Linux capabilities, uses a
   read-only root filesystem, and disables privilege escalation.
-- Kubernetes examples use a restricted service account, non-root security
+- Kubernetes manifests use a restricted service account, non-root security
   context, read-only root filesystem, dropped capabilities, resource
   requests/limits, and an egress NetworkPolicy.
 - `.env`, local data, generated Airflow auth files, logs, and build artifacts
   are excluded from Git. `.env.example` contains placeholders only.
 
-## Demo-only limitations
+## Current deployment limitations
 
-- Kafka uses plaintext inside an isolated local Docker network. The client
+- Kafka uses plaintext inside the isolated local Compose network. The client
   supports TLS/SASL_SSL for an appropriately configured external broker, but
   there is no broker authentication, ACL, schema registry, or production
-  multi-broker replication in this Compose demo.
+  multi-broker replication in the current Compose deployment.
 - Kubernetes manifests expect Kafka/PostgreSQL services and labels in the same
   namespace. NetworkPolicy is enforced only by a compatible cluster CNI, and
   DNS/egress rules may need adjustment for a cluster's DNS and managed
@@ -105,5 +105,5 @@ exposed.
 ## Before production
 
 See the [production-readiness register](production-readiness.md) for all
-remaining infrastructure and approval gates. Do not connect this demo to an
-OT or process-control network without a separate approved architecture.
+remaining infrastructure and approval gates. Do not connect this pipeline to
+an OT or process-control network without a separate approved architecture.

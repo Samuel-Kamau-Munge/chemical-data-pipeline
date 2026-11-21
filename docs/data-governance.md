@@ -1,6 +1,6 @@
 # Data governance
 
-This document defines the demonstration project's current data contract and
+This document defines the pipeline's current data contract and
 governance boundaries. It is not a site policy or regulatory determination.
 All classifications below are proposals only; the site's classification,
 data owner, steward, and access approver remain undefined.
@@ -27,17 +27,16 @@ after whitespace trimming. See the [README](../README.md#input-csv-format) for
 the field semantics, accepted unit aliases, timestamp rules, and validation
 behavior.
 
-The demo Airflow schedule uses `Africa/Nairobi` only as a scheduling example;
-it is not a plant timezone or a rule for interpreting naive measurement
-timestamps.
+Airflow polls every minute. That polling cadence does not establish a plant
+timezone or a rule for interpreting naive measurement timestamps.
 
 Kafka messages have `schema_version: 1`, a deterministic `event_id`, a
 `source_sha256`, and an event type. File lifecycle events are
 `file.started`, `file.completed`, and `file.failed`; row events use
 `lab_result` and distinguish `accepted` from `quarantined`. Consumers reject
 unknown versions and malformed identities. Breaking message changes require
-an explicit versioned topic or schema migration plan; the current demo does
-not use an external schema registry.
+an explicit versioned topic or schema migration plan; the current deployment
+does not use an external schema registry.
 
 ## Lineage
 
@@ -66,7 +65,7 @@ content but does not prove who produced it or make storage immutable.
 - A laboratory or quality data steward should own the analyte/method/unit
   dictionary, acceptable ranges, source-system mappings, and quarantine
   disposition process. No such site-specific owner or specification is
-  configured in this demo.
+  configured for this deployment.
 
 The producer validates supported spellings but does not convert values or
 check an analyte against a laboratory specification. Do not treat dbt
@@ -80,8 +79,8 @@ the raw archive, PostgreSQL, Kafka volumes, Airflow logs, and exported marts
 according to the classification of their data. Restrict access to quarantine
 payloads and raw rows to authorized laboratory and platform roles.
 
-The PostgreSQL demo uses separate `pipeline_ingest`, `pipeline_reader`, and
-`dbt_transform` roles. These are service roles, not per-human identities.
+The PostgreSQL deployment uses separate `pipeline_ingest`, `pipeline_reader`,
+and `dbt_transform` roles. These are service roles, not per-human identities.
 Airflow Simple Auth Manager is for local development only. Production requires
 an approved identity provider, auditable access reviews, managed secrets,
 encrypted transport and storage, backup/restore testing, and a validated

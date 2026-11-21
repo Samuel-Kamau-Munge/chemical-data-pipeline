@@ -1,41 +1,42 @@
-# Chemical Lab Data Platform
+# Real-Time Chemical Lab Data Platform
 
-An end-to-end, local demonstration of a data-engineering pipeline for
-laboratory results from a chemical manufacturing context. The project connects
-CSV ingestion, Python validation, Kafka, PostgreSQL, dbt, and Airflow, with
-container and Kubernetes deployment examples, data-governance documentation,
-and security controls.
+An operational, near-real-time data pipeline for chemical laboratory results.
+Airflow polls the incoming-file location every minute; each new CSV is
+validated and streamed as keyed Kafka events, persisted in PostgreSQL,
+reconciled, and transformed and tested by dbt. Docker Compose runs the
+integrated pipeline locally, and Kubernetes manifests support deployment of
+the consumer workload.
 
-> **Scope:** This is a portfolio/demo platform using synthetic example data.
-> It is not a validated laboratory information system, manufacturing
-> execution system, or production control system. It does not connect to
-> instruments, LIMS, plant networks, or process-control equipment.
+> **Integration boundary:** The current source adapter consumes CSV exports.
+> Plant LIMS and instrument interfaces, site-approved laboratory rules,
+> high-availability infrastructure, and formal production validation still
+> require configuration and approval by the responsible plant teams. This
+> pipeline is not a manufacturing or process-control system.
 
-## What this project demonstrates
+## Current operating capabilities
 
-| Area | Project evidence | Demo status |
+| Area | Project evidence | Current status |
 | --- | --- | --- |
 | Python ingestion | Strict CSV parser, content-addressed raw archive, deterministic row IDs, event producer | Implemented |
 | Data validation | Required-field, finite-decimal, unit-alias, timestamp, Kafka-envelope, PostgreSQL constraint, and dbt tests | Implemented |
 | Kafka | Keyed versioned events, topic setup, consumer group, manual offset commits, optional TLS/SASL_SSL client support | Implemented; at-least-once; local broker plaintext |
 | PostgreSQL | Raw event/manifests tables, constraints, service roles, checksummed versioned migrations, ingestion reconciliation | Implemented |
 | dbt | Source declarations, staging views, analytical marts, schema tests, generated schema strategy | Implemented; run with Compose |
-| Airflow | Daily DAG: publish, wait, reconcile, `dbt build`, report; optional HTTPS failure webhook | Implemented; notifications require configuration |
-| Kubernetes | Restricted consumer Deployment, ServiceAccount, resource limits, probes, and egress NetworkPolicy | Example manifest; requires cluster services |
+| Airflow | Every-minute file polling, publish, wait, reconcile, `dbt build`, report; optional HTTPS failure webhook | Implemented; notifications require configuration |
+| Kubernetes | Restricted consumer Deployment, ServiceAccount, resource limits, probes, and egress NetworkPolicy | Deployment manifest; requires cluster services |
 | Governance | Data contract, proposed classification, lineage, ownership, retention and quality responsibilities | Documented; site approval outstanding |
-| Pipeline security | Least-privilege roles, optional Kafka TLS clients, HTTPS alert hook, container hardening, network policy | Demo controls; not production-certified |
+| Pipeline security | Least-privilege roles, optional Kafka TLS clients, HTTPS alert hook, container hardening, network policy | Controls implemented; production review outstanding |
 | CI | Python unit tests, dbt parse, PostgreSQL migration/reconciliation integration test | Configured in GitHub Actions |
 
-This repository contains concrete configuration and code for the listed
-technologies; it does not claim that a full distributed or regulated
-production environment has been deployed. The current development host does
-not have Docker or Kubernetes installed, so the complete Compose and cluster
-runtime have not been exercised here.
+The Compose services and DAG have been exercised together locally, including
+Kafka ingestion, PostgreSQL persistence, reconciliation, and dbt tests.
+Kubernetes deployment and site-specific LIMS/instrument integration have not
+been exercised or configured.
 
 ## Architecture
 
 ```text
-CSV export
+Incoming CSV export (polled every minute)
    |
    v
 Airflow DAG -> Python parser, validation, raw-byte archive
@@ -56,17 +57,17 @@ Airflow DAG -> Python parser, validation, raw-byte archive
                 dbt analytical marts
 ```
 
-Airflow coordinates the workflow; Kafka decouples validated row events from
-database persistence; PostgreSQL is the analytical source of truth; dbt
-transforms and tests the raw records. The Kubernetes example deploys the
-consumer workload. Docker Compose supplies a single-machine development
-environment.
+Airflow checks for new files every minute and coordinates the workflow; Kafka
+decouples validated row events from database persistence; PostgreSQL is the
+analytical source of truth; dbt transforms and tests the raw records. The
+Kubernetes deployment targets the consumer workload. Docker Compose supplies
+the single-machine runtime.
 
 ## Repository layout
 
 ```text
 chemical_pipeline/
-  pipeline.py                 CSV parsing, validation, SQLite demo mode
+  pipeline.py                 CSV parsing, validation, SQLite compatibility mode
   streaming.py                Validated, versioned Kafka producer
   postgres_consumer.py        Kafka consumer, PostgreSQL writes, event checks
   kafka_config.py             Optional TLS/SASL_SSL client configuration
@@ -87,16 +88,16 @@ dbt/
     marts/                    Batch/analyte and ingestion-quality models
     schema.yml                dbt data-quality tests and descriptions
 infra/postgres/init/
-  001_roles.sh                Demo service roles
+  001_roles.sh                Local service roles
 infra/postgres/migrations/
   0001_initial_schema.sql     Versioned PostgreSQL baseline
-k8s/base/                     Kustomize consumer Deployment and policy example
+k8s/base/                     Kustomize consumer Deployment and policy
 docs/
   data-governance.md
   security.md
   production-readiness.md     Status register and unresolved approval gates
 examples/
-  lab-results.csv             Synthetic accepted and rejected examples
+  lab-results.csv             Synthetic test fixture; not plant data
 tests/
   test_pipeline.py
   test_events.py
@@ -106,7 +107,7 @@ tests/
 compose.yaml                  Local Kafka, PostgreSQL, consumer, and Airflow
 Dockerfile                    Non-root Python consumer image
 Dockerfile.airflow            Airflow/dbt runtime image
-scripts/init-demo.sh          Generates local credentials and data folders
+scripts/init-local.sh         Generates local credentials and prepares data folders
 .github/workflows/ci.yml      Unit tests and dbt parse checks
 ```
 
@@ -144,9 +145,9 @@ business-key deduplication are configured.
 
 ### Kafka event envelope
 
-Topic: `lab-results.v1`, created with three partitions in the local demo.
-Messages use the source SHA-256 as the Kafka key so events for the same file
-are ordered in one partition.
+Topic: `lab-results.v1`, created with three partitions in the local Compose
+deployment. Messages use the source SHA-256 as the Kafka key so events for the
+same file are ordered in one partition.
 
 All envelopes contain:
 
@@ -222,8 +223,8 @@ stored in the repository.
 ### SQLite CLI model
 
 The original `ingest`/`export` commands remain as a dependency-free,
-single-process demonstration and are covered by unit tests. They use a separate
-SQLite database, not the Kafka/PostgreSQL Compose path:
+single-process SQLite compatibility path and are covered by unit tests. They
+use a separate SQLite database, not the Kafka/PostgreSQL Compose path:
 
 - `ingestion_files(source_sha256, source_filename, ingested_at, byte_count,
   total_rows, accepted_rows, rejected_rows)` stores per-file metadata.
@@ -255,7 +256,7 @@ laboratory release criteria or establish that a result is within specification.
 The `generate_schema_name` macro maps custom schemas directly to `staging` and
 `marts` (instead of prefixing them with the profile's `analytics` schema).
 
-## Run locally with Docker Compose
+## Run the real-time stack with Docker Compose
 
 Requirements: Docker Engine and the Docker Compose v2 plugin. From the project
 root:
@@ -268,30 +269,31 @@ SQLite metadata database in the `airflow_data` volume; PostgreSQL is the
 pipeline's raw/analytics database.
 
 ```bash
-./scripts/init-demo.sh
+./scripts/init-local.sh
 docker compose up --build -d
 docker compose ps
 ```
 
 The setup script creates a local `.env` with four distinct random hexadecimal
 passwords and prepares `data/`. The file is mode `0600` and ignored by Git.
-Never commit `.env`; use a managed secrets system for anything beyond a
-disposable local demo. Kafka and PostgreSQL stay on an internal-only Compose
-network; Airflow joins a separate UI network and publishes only its web UI to
-host loopback (`127.0.0.1:8081`).
+Never commit `.env`; use a managed secrets system for shared environments.
+Kafka and PostgreSQL stay on an internal-only Compose network; Airflow joins a
+separate UI network and publishes only its web UI to host loopback
+(`127.0.0.1:8081`).
 
-Put the included synthetic file in the watched folder:
+The included synthetic CSV is a test fixture, not operational plant data. To
+exercise the pipeline, copy it into the watched folder:
 
 ```bash
 cp examples/lab-results.csv data/incoming/
 ```
 
-The Airflow DAG is paused on creation. Open <http://127.0.0.1:8081>, obtain the
-generated development admin password from the local Airflow container output
-or its Airflow home, inspect `chemical_lab_csv_pipeline`, then unpause and
-trigger it when ready. The DAG:
+The Airflow DAG is paused on first initialization. Open
+<http://127.0.0.1:8081>, obtain the generated development admin password from
+the local Airflow container output or its Airflow home, inspect
+`chemical_lab_csv_pipeline`, then unpause it. The DAG:
 
-1. publishes each `.csv` directly under `data/incoming/`;
+1. checks `data/incoming/` every minute and publishes each new `.csv`;
 2. waits until Kafka events are persisted into PostgreSQL;
 3. reconciles each file manifest with persisted row-event counts;
 4. runs `dbt build` (models plus data tests); and
@@ -305,10 +307,12 @@ run, and attempt identifiers; it contains no sample or result values. Without
 an endpoint, failures remain visible in Airflow state and logs, but no external
 notification is sent.
 
-The incoming files are not moved or deleted. Re-running an identical CSV may
-republish the same deterministic events; PostgreSQL prevents duplicate rows.
-`data/raw/` retains content-addressed CSV bytes, and generated outputs and
-Airflow/DBT artifacts are excluded from Git.
+Successfully ingested files remain in the incoming folder but are not
+republished: the DAG checks the content hash against completed PostgreSQL
+manifests. A changed file produces a new hash and a new ingestion. `data/raw/`
+retains content-addressed CSV bytes, and generated outputs and Airflow/dbt
+artifacts are excluded from Git. Producers should write to a temporary path
+and atomically rename completed CSVs into `data/incoming/`.
 
 Inspect service logs:
 
@@ -319,7 +323,7 @@ docker compose logs --tail=100 kafka
 docker compose logs --tail=100 postgres
 ```
 
-Stop the demo without deleting its databases or volumes:
+Stop the local stack without deleting its databases or volumes:
 
 ```bash
 docker compose down
@@ -327,16 +331,16 @@ docker compose down
 
 The `migrate` service maintains `pipeline_meta.schema_migrations`, takes a
 PostgreSQL advisory lock, applies each SQL migration transactionally, and
-refuses to run if an already-applied migration's checksum changes. The initial
-migration is safe to apply to the demo's existing schema. Future changes must
-be forward-only and preserve the prior application contract during rollout.
+refuses to run if an already-applied migration's checksum changes. Future
+changes must be forward-only and preserve the prior application contract
+during rollout.
 
-`docker compose down -v` deletes the demo's PostgreSQL, Kafka, and Airflow
-volumes. Use that only when intentionally resetting all local demo state.
+`docker compose down -v` deletes the stack's PostgreSQL, Kafka, and Airflow
+volumes. Use that only when intentionally resetting all local stack state.
 
 ### CLI
 
-The standard-library SQLite demonstration path remains available:
+The standard-library SQLite compatibility path remains available:
 
 ```bash
 python3 -m venv .venv
@@ -371,12 +375,12 @@ PIPELINE_DB_URL="$PIPELINE_DB_URL" \
   python -m chemical_pipeline consume --bootstrap-servers localhost:9092
 ```
 
-In the Compose demo, Kafka and PostgreSQL are intentionally not exposed on
-host ports. Use the Airflow DAG or execute publisher commands from a container
-on the Compose network.
+In the local Compose deployment, Kafka and PostgreSQL are intentionally not
+exposed on host ports. Use the Airflow DAG or execute publisher commands from
+a container on the Compose network.
 
-The demo configurations use plaintext Kafka. For a TLS-enabled external broker,
-set `PIPELINE_KAFKA_SECURITY_PROTOCOL=SSL` or `SASL_SSL` and
+The local broker uses plaintext Kafka. For a TLS-enabled external broker, set
+`PIPELINE_KAFKA_SECURITY_PROTOCOL=SSL` or `SASL_SSL` and
 provide a trusted `PIPELINE_KAFKA_SSL_CA_FILE`; `SASL_SSL` additionally requires
 `PIPELINE_KAFKA_SASL_MECHANISM`, `PIPELINE_KAFKA_SASL_USERNAME`, and
 `PIPELINE_KAFKA_SASL_PASSWORD`. Credentials over plaintext are rejected. Broker
@@ -384,11 +388,12 @@ ACLs and principal provisioning remain responsibilities of the Kafka platform.
 
 ## Airflow
 
-The DAG ID is `chemical_lab_csv_pipeline`, scheduled daily at 09:00
-`Africa/Nairobi` for the demo, with catchup disabled and at most one active DAG
-run. This schedule timezone is not a plant timezone decision; set it with
-plant operations after the site timezone is formally established. Its task
-graph is:
+The DAG ID is `chemical_lab_csv_pipeline`, scheduled every minute with catchup
+disabled and at most one active DAG run. This gives new files a polling delay
+of up to one minute before validation and Kafka publication, plus processing
+time; it is near-real-time micro-batching, not a hard latency guarantee.
+Naive measurement timestamps remain timezone-unknown until the site timezone
+is formally established. Its task graph is:
 
 ```text
 publish_incoming_files
@@ -406,19 +411,18 @@ dbt_build
 report_run
 ```
 
-`wait_for_postgres` is a rescheduling sensor, not a busy loop. The report task
-uses `all_done` and checks upstream task states as well as file errors so a
-successful report task cannot hide a failed publish, sensor, reconciliation,
-or dbt task. Failure webhooks use the optional HTTPS endpoint described above.
+Completed files are hash-checked and skipped; empty polling intervals skip
+downstream work. `wait_for_postgres` is a rescheduling sensor, not a busy loop.
+Airflow task states expose failures at each stage. Failure webhooks use the
+optional HTTPS endpoint described above.
 
 The Airflow image uses Airflow `3.1.0`, Python `3.12`, and dbt-postgres
 `1.7.10`, with dbt and protobuf aligned to the Airflow 3.1.0 constraints.
-Airflow `standalone`
-and its Simple Auth Manager are for local demonstration only. For production,
-deploy separately managed Airflow components with an approved identity
-provider and metadata database.
+Airflow `standalone` and its Simple Auth Manager are for local operation only.
+For production, deploy separately managed Airflow components with an approved
+identity provider and metadata database.
 
-## Kubernetes example
+## Kubernetes deployment
 
 `k8s/base/` contains a Kustomize deployment for the non-root Kafka/PostgreSQL
 consumer, plus a restricted ServiceAccount, resource requests/limits,
@@ -464,11 +468,11 @@ passwords in a committed YAML manifest or command history. Use your cluster's
 secret-management integration for shared environments. For an external
 `SASL_SSL` broker, set the ConfigMap protocol to `SASL_SSL`, populate the
 SASL username/password keys in the mounted consumer Secret, and create the
-`kafka-ca` Secret with its `ca.crt` key. The example uses a Kubernetes Secret
-as a placeholder, not a managed secrets integration. The NetworkPolicy
+`kafka-ca` Secret with its `ca.crt` key. This Kubernetes Secret configuration
+is a deployment option, not a managed secrets integration. The NetworkPolicy
 requires a CNI that enforces Kubernetes NetworkPolicy and may need adaptation
 for a managed Kafka/PostgreSQL service or different cluster DNS. These are
-application deployment examples, not a complete production cluster chart.
+application deployment manifests, not a complete production cluster chart.
 
 ## Data governance and security
 
@@ -478,7 +482,7 @@ ownership, quality responsibilities, and unresolved retention requirements in
 [`docs/data-governance.md`](docs/data-governance.md). The threat boundaries,
 implemented controls, and gaps are in [`docs/security.md`](docs/security.md).
 
-Implemented demonstration controls include:
+Implemented pipeline controls include:
 
 - validation before publishing and explicit quarantine instead of silent drops;
 - deterministic identities, raw source retention, database constraints, and
@@ -498,7 +502,7 @@ broker ACLs or managed identities. The project also lacks encryption at rest,
 production identity/authorization, backups, retention enforcement, signed or
 immutable audit records, an external schema registry, and regulatory
 validation. The synthetic CSV format has no human or patient data. Do not
-connect the demo to a plant control network or use its marts for release
+connect the pipeline to a plant control network or use its marts for release
 decisions.
 
 ## Tests and CI

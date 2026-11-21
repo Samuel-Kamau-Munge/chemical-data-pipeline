@@ -3,6 +3,23 @@ from __future__ import annotations
 from typing import Any
 
 
+def completed_source_hashes(connection: Any, source_hashes: list[str]) -> set[str]:
+    hashes = sorted(set(source_hashes))
+    if not hashes:
+        return set()
+
+    rows = connection.execute(
+        """
+        SELECT source_sha256
+        FROM raw.ingestion_files
+        WHERE source_sha256 = ANY(%s)
+          AND status = 'completed'
+        """,
+        (hashes,),
+    ).fetchall()
+    return {row[0].strip() for row in rows}
+
+
 def reconcile_source_files(connection: Any, source_hashes: list[str]) -> int:
     hashes = sorted(set(source_hashes))
     if not hashes:

@@ -3,12 +3,11 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from airflow import DAG
-from airflow.exceptions import AirflowException
+from airflow.exceptions import AirflowException, AirflowSkipException
 from airflow.providers.standard.operators.bash import BashOperator
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.providers.standard.sensors.python import PythonSensor
@@ -20,7 +19,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from chemical_pipeline.alerting import notify_failure  # noqa: E402
-from chemical_pipeline.reconciliation import reconcile_source_files  # noqa: E402
+from chemical_pipeline.pipeline import _file_sha256  # noqa: E402
+from chemical_pipeline.reconciliation import (  # noqa: E402
+    completed_source_hashes,
+    reconcile_source_files,
+)
 from chemical_pipeline.streaming import StreamingInputError, publish_csv  # noqa: E402
 
 
@@ -37,9 +40,43 @@ def publish_incoming_files() -> dict[str, object]:
         for path in INCOMING_DIR.iterdir()
         if path.is_file() and path.suffix.lower() == ".csv"
     )
+    if not sources:
+        raise AirflowSkipException("No CSV files are waiting for ingestion")
+
     results: list[dict[str, object]] = []
     errors: list[str] = []
+    source_hashes: dict[Path, str] = {}
     for source in sources:
+        try:
+            source_hashes[source] = _file_sha256(source)
+        except OSError as error:
+            logging.exception("Unable to hash %s", source.name)
+            errors.append(f"{source.name}: {error}")
+
+    completed_hashes: set[str] = set()
+    if source_hashes:
+        try:
+            import psycopg
+        except ImportError as error:
+            raise RuntimeError("The Airflow worker requires psycopg") from error
+
+        with psycopg.connect(
+            os.environ["PIPELINE_READER_DB_URL"], connect_timeout=5
+        ) as connection:
+            completed_hashes = completed_source_hashes(
+                connection, list(source_hashes.values())
+            )
+
+    skipped_files = 0
+    for source, source_sha256 in source_hashes.items():
+        if source_sha256 in completed_hashes:
+            skipped_files += 1
+            logging.info(
+                "Skipping already completed CSV %s (sha256=%s)",
+                source.name,
+                source_sha256,
+            )
+            continue
         try:
             results.append(publish_csv(source, RAW_DIR, BOOTSTRAP_SERVERS))
         except StreamingInputError as error:
@@ -57,11 +94,19 @@ def publish_incoming_files() -> dict[str, object]:
         except (OSError, UnicodeError, ValueError, RuntimeError) as error:
             logging.exception("Unable to publish %s", source.name)
             errors.append(f"{source.name}: {error}")
-    summary = {"files_found": len(sources), "results": results, "errors": errors}
+    if not results and not errors:
+        raise AirflowSkipException("No new CSV files require ingestion")
+
+    summary = {
+        "files_found": len(sources),
+        "files_skipped": skipped_files,
+        "results": results,
+        "errors": errors,
+    }
     logging.info(
-        "Published %d/%d CSV files; errors=%d",
+        "Published %d CSV files; skipped %d completed files; errors=%d",
         len(results),
-        len(sources),
+        skipped_files,
         len(errors),
     )
     return summary
@@ -145,8 +190,8 @@ def report_run(**context) -> None:
 with DAG(
     dag_id="chemical_lab_csv_pipeline",
     description="Publish validated lab CSV rows through Kafka into PostgreSQL and dbt",
-    schedule="0 9 * * *",
-    start_date=datetime(2026, 1, 1, tzinfo=ZoneInfo("Africa/Nairobi")),
+    schedule="* * * * *",
+    start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
     catchup=False,
     max_active_runs=1,
     tags=["chemical", "kafka", "postgres", "dbt", "data-quality"],

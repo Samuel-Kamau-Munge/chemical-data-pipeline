@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from chemical_pipeline.reconciliation import reconcile_source_files
+from chemical_pipeline.reconciliation import (
+    completed_source_hashes,
+    reconcile_source_files,
+)
 
 
 class FakeConnection:
@@ -19,6 +22,25 @@ class FakeConnection:
 
 
 class ReconciliationTests(unittest.TestCase):
+    def test_selects_only_completed_source_hashes(self) -> None:
+        completed_hash = "e" * 64
+        connection = FakeConnection([(completed_hash,)])
+
+        self.assertEqual(
+            completed_source_hashes(
+                connection, [completed_hash, completed_hash, "f" * 64]
+            ),
+            {completed_hash},
+        )
+        self.assertEqual(
+            connection.parameters, ([completed_hash, "f" * 64],)
+        )
+
+    def test_completed_hash_lookup_avoids_empty_query(self) -> None:
+        connection = FakeConnection([])
+        self.assertEqual(completed_source_hashes(connection, []), set())
+        self.assertIsNone(connection.parameters)
+
     def test_accepts_matching_completed_file_counts(self) -> None:
         source_hash = "a" * 64
         connection = FakeConnection(
